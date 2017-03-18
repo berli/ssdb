@@ -1,11 +1,19 @@
+/*
+Copyright (c) 2012-2014 The SSDB Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+*/
 #ifndef UTIL_THREAD_H_
 #define UTIL_THREAD_H_
 
-#include "../include.h"
+#include <unistd.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
 #include <pthread.h>
 #include <queue>
 #include <vector>
-
 
 class Mutex{
 	private:
@@ -94,7 +102,7 @@ class SelectableQueue{
 		int fd(){
 			return fds[0];
 		}
-
+		int size();
 		// multi writer
 		int push(const T item);
 		// single reader
@@ -112,7 +120,7 @@ class WorkerPool{
 				int id;
 				virtual void init(){}
 				virtual void destroy(){}
-				virtual int proc(JOB *job) = 0;
+				virtual int proc(JOB job) = 0;
 			private:
 			protected:
 				std::string name;
@@ -228,6 +236,7 @@ int Queue<T>::pop(T *data){
 template <class T>
 SelectableQueue<T>::SelectableQueue(){
 	if(pipe(fds) == -1){
+		fprintf(stderr, "create pipe error\n");
 		exit(0);
 	}
 	pthread_mutex_init(&mutex, NULL);
@@ -249,10 +258,20 @@ int SelectableQueue<T>::push(const T item){
 		items.push(item);
 	}
 	if(::write(fds[1], "1", 1) == -1){
+		fprintf(stderr, "write fds error\n");
 		exit(0);
 	}
 	pthread_mutex_unlock(&mutex);
 	return 1;
+}
+
+template <class T>
+int SelectableQueue<T>::size(){
+	int ret = 0;
+	pthread_mutex_lock(&mutex);
+	ret = items.size();
+	pthread_mutex_unlock(&mutex);
+	return ret;
 }
 
 template <class T>
@@ -333,7 +352,7 @@ void* WorkerPool<W, JOB>::_run_worker(void *arg){
 			::exit(0);
 			break;
 		}
-		worker->proc(&job);
+		worker->proc(job);
 		if(tp->results.push(job) == -1){
 			fprintf(stderr, "results.push error\n");
 			::exit(0);
@@ -377,6 +396,7 @@ int WorkerPool<W, JOB>::stop(){
 		pthread_cancel(tids[i]);
 #endif
 	}
+	started = false;
 	return 0;
 }
 

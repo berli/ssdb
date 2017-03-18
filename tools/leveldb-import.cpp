@@ -1,3 +1,8 @@
+/*
+Copyright (c) 2012-2015 The SSDB Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+*/
 #include "include.h"
 
 #include <string>
@@ -8,14 +13,14 @@
 #include "leveldb/slice.h"
 #include "leveldb/iterator.h"
 
-#include "link.h"
+#include "net/link.h"
 #include "util/log.h"
 #include "util/file.h"
 #include "util/strings.h"
 
 void welcome(){
 	printf("leveldb-import - Import existing leveldb into ssdb\n");
-	printf("Copyright (c) 2013-2014 ssdb.io\n");
+	printf("Copyright (c) 2013-2015 ssdb.io\n");
 	printf("\n");
 }
 

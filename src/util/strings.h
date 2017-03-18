@@ -1,9 +1,21 @@
+/*
+Copyright (c) 2012-2014 The SSDB Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+*/
 #ifndef UTIL_STRING_H
 #define UTIL_STRING_H
 
-#include "../include.h"
+#include <unistd.h>
+#include <string.h>
+#include <errno.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <inttypes.h>
 #include <string>
 #include <algorithm>
+
 
 inline static
 int is_empty_str(const char *str){
@@ -64,18 +76,142 @@ std::string real_dirname(const char *filepath){
 		if(p != NULL){
 			dir.append(p);
 		}
+		dir.append("/");
 	}
 
 	const char *p = strrchr(filepath, '/');
 	if(p != NULL){
-		dir.append("/");
 		dir.append(filepath, p - filepath);
 	}
 	return dir;
 }
 
 inline static
+void str_escape(const char *s, int size, std::string *ret){
+	static const char *hex = "0123456789abcdef";
+	for(int i=0; i<size; i++){
+		char c = s[i];
+		switch(c){
+			case '\r':
+				ret->append("\\r");
+				break;
+			case '\n':
+				ret->append("\\n");
+				break;
+			case '\t':
+				ret->append("\\t");
+				break;
+			case '\\':
+				ret->append("\\\\");
+				break;
+			case ' ':
+				ret->push_back(c);
+				break;
+			default:
+				if(c >= '!' && c <= '~'){
+					ret->push_back(c);
+				}else{
+					ret->append("\\x");
+					unsigned char d = c;
+					ret->push_back(hex[d >> 4]);
+					ret->push_back(hex[d & 0x0f]);
+				}
+				break;
+		}
+	}
+}
+
+inline static
+std::string str_escape(const char *s, int size){
+	std::string ret;
+	int capacity = (size < 20)? 32 : (size * 1.2);
+	ret.reserve(capacity);
+	str_escape(s, size, &ret);
+	return ret;
+}
+
+inline static
+std::string str_escape(const std::string &s){
+	return str_escape(s.data(), (int)s.size());
+}
+
+inline static
+int hex_int(char c){
+	if(c >= '0' && c <= '9'){
+		return c - '0';
+	}else{
+		return c - 'a' + 10;
+	}
+}
+
+inline static
+void str_unescape(const char *s, int size, std::string *ret){
+	for(int i=0; i<size; i++){
+		char c = s[i];
+		if(c != '\\'){
+			ret->push_back(c);
+		}else{
+			if(i >= size - 1){
+				continue;
+			}
+			char c2 = s[++i];
+			switch(c2){
+				case 'a':
+					ret->push_back('\a');
+					break;
+				case 'b':
+					ret->push_back('\b');
+					break;
+				case 'f':
+					ret->push_back('\f');
+					break;
+				case 'v':
+					ret->push_back('\v');
+					break;
+				case 'r':
+					ret->push_back('\r');
+					break;
+				case 'n':
+					ret->push_back('\n');
+					break;
+				case 't':
+					ret->push_back('\t');
+					break;
+				case '\\':
+					ret->push_back('\\');
+					break;
+				case 'x':
+					if(i < size - 2){
+						char c3 = s[++i];
+						char c4 = s[++i];
+						ret->push_back((char)((hex_int(c3) << 4) + hex_int(c4)));
+					}
+					break;
+				default:
+					ret->push_back(c2);
+					break;
+			}
+		}
+	}
+}
+
+inline static
+std::string str_unescape(const char *s, int size){
+	std::string ret;
+	ret.reserve(size);
+	str_unescape(s, size, &ret);
+	return ret;
+}
+
+inline static
+std::string str_unescape(const std::string &s){
+	return str_unescape(s.data(), (int)s.size());
+}
+
+inline static
 std::string hexmem(const void *p, int size){
+	return str_escape((char *)p, size);
+	/*
 	std::string ret;
 	char buf[4];
 	for(int i=0; i<size; i++){
@@ -97,6 +233,7 @@ std::string hexmem(const void *p, int size){
 		}
 	}
 	return ret;
+	*/
 }
 
 // TODO: mem_printf("%5c%d%s", p, size);
@@ -111,59 +248,35 @@ void dump(const void *p, int size, const char *msg = NULL){
 	printf("%s>\n", s.c_str());
 }
 
+
 static inline
-int str_to_int(const char *p, int size){
-	return atoi(std::string(p, size).c_str());
+std::string str(const char *s){
+	return std::string(s);
 }
 
 static inline
-int str_to_int(const std::string &str){
-	return atoi(str.c_str());
-}
-
-static inline
-std::string int_to_str(int v){
+std::string str(int v){
 	char buf[21] = {0};
 	snprintf(buf, sizeof(buf), "%d", v);
 	return std::string(buf);
 }
 
 static inline
-int64_t str_to_int64(const std::string &str){
-	return (int64_t)atoll(str.c_str());
-}
-
-static inline
-int64_t str_to_int64(const char *p, int size){
-	return (int64_t)atoll(std::string(p, size).c_str());
-}
-
-static inline
-std::string int64_to_str(int64_t v){
+std::string str(int64_t v){
 	char buf[21] = {0};
 	snprintf(buf, sizeof(buf), "%" PRId64 "", v);
 	return std::string(buf);
 }
 
 static inline
-uint64_t str_to_uint64(const char *p, int size){
-	return (uint64_t)strtoull(std::string(p, size).c_str(), (char **)NULL, 10);
-}
-
-static inline
-std::string uint64_to_str(uint64_t v){
+std::string str(uint64_t v){
 	char buf[21] = {0};
 	snprintf(buf, sizeof(buf), "%" PRIu64 "", v);
 	return std::string(buf);
 }
 
 static inline
-double str_to_double(const char *p, int size){
-	return atof(std::string(p, size).c_str());
-}
-
-static inline
-std::string double_to_str(double v){
+std::string str(double v){
 	char buf[21] = {0};
 	if(v - floor(v) == 0){
 		snprintf(buf, sizeof(buf), "%.0f", v);
@@ -174,14 +287,93 @@ std::string double_to_str(double v){
 }
 
 static inline
+std::string str(float v){
+	return str((double)v);
+}
+
+// all str_to_xx methods set errno on error
+
+static inline
+int str_to_int(const std::string &str){
+	const char *start = str.c_str();
+	char *end;
+	int ret = (int)strtol(start, &end, 10);
+	// the WHOLE string must be string represented integer
+	if(*end == '\0' && size_t(end - start) == str.size()){
+		errno = 0;
+	}else{
+		// strtoxx do not set errno all the time!
+		if(errno == 0){
+			errno = EINVAL;
+		}
+	}
+	return ret;
+}
+
+static inline
+int str_to_int(const char *p, int size){
+	return str_to_int(std::string(p, size));
+}
+
+static inline
+int64_t str_to_int64(const std::string &str){
+	const char *start = str.c_str();
+	char *end;
+	int64_t ret = (int64_t)strtoll(start, &end, 10);
+	// the WHOLE string must be string represented integer
+	if(*end == '\0' && size_t(end - start) == str.size()){
+		errno = 0;
+	}else{
+		// strtoxx do not set errno all the time!
+		if(errno == 0){
+			errno = EINVAL;
+		}
+	}
+	return ret;
+}
+
+static inline
+int64_t str_to_int64(const char *p, int size){
+	return str_to_int64(std::string(p, size));
+}
+
+static inline
+uint64_t str_to_uint64(const std::string &str){
+	const char *start = str.c_str();
+	char *end;
+	uint64_t ret = (uint64_t)strtoull(start, &end, 10);
+	// the WHOLE string must be string represented integer
+	if(*end == '\0' && size_t(end - start) == str.size()){
+		errno = 0;
+	}else{
+		// strtoxx do not set errno all the time!
+		if(errno == 0){
+			errno = EINVAL;
+		}
+	}
+	return ret;
+}
+
+static inline
+uint64_t str_to_uint64(const char *p, int size){
+	return str_to_uint64(std::string(p, size));
+}
+
+static inline
+double str_to_double(const char *p, int size){
+	return atof(std::string(p, size).c_str());
+}
+
+static inline
 std::string substr(const std::string &str, int start, int size){
 	if(start < 0){
-		start = str.size() + start;
+		start = (int)str.size() + start;
 	}
 	if(size < 0){
-		size = (str.size() + size) - start;
+		// 忽略掉 abs(size) 个字节
+		size = ((int)str.size() + size) - start;
 	}
-	if(start < 0 || start >= str.size() || size < 0){
+	if(start < 0 || size_t(start) >= str.size() || size < 0){
 		return "";
 	}
 	return str.substr(start, size);
@@ -190,15 +382,15 @@ std::string substr(const std::string &str, int start, int size){
 static inline
 std::string str_slice(const std::string &str, int start, int end){
 	if(start < 0){
-		start = str.size() + start;
+		start = (int)str.size() + start;
 	}
 	int size;
 	if(end < 0){
-		size = (str.size() + end + 1) - start;
+		size = ((int)str.size() + end + 1) - start;
 	}else{
 		size = end - start + 1;
 	}
-	if(start < 0 || start >= str.size() || size < 0){
+	if(start < 0 || size_t(start) >= str.size() || size < 0){
 		return "";
 	}
 	return str.substr(start, size);

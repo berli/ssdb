@@ -1,7 +1,13 @@
+/*
+Copyright (c) 2012-2014 The SSDB Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+*/
 #include <pthread.h>
 #include "backend_dump.h"
+#include "util/log.h"
 
-BackendDump::BackendDump(const SSDB *ssdb){
+BackendDump::BackendDump(SSDB *ssdb){
 	this->ssdb = ssdb;
 }
 
@@ -24,6 +30,7 @@ void BackendDump::proc(const Link *link){
 }
 
 void* BackendDump::_run_thread(void *arg){
+	pthread_detach(pthread_self());
 	struct run_arg *p = (struct run_arg*)arg;
 	const BackendDump *backend = p->backend;
 	Link *link = (Link *)p->link;
@@ -95,5 +102,6 @@ void* BackendDump::_run_thread(void *arg){
 
 	log_info("fd: %d, delete link", link->fd());
 	delete link;
+	delete it;
 	return (void *)NULL;
 }

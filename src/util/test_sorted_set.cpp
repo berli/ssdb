@@ -1,9 +1,15 @@
+/*
+Copyright (c) 2012-2014 The SSDB Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 #include <vector>
 #include "log.h"
 #include "sorted_set.h"
+#include "bytes.h"
 
 int main(int argc, char **argv){	
 	SortedSet zset;
@@ -23,15 +29,28 @@ int main(int argc, char **argv){
 	}
 	log_debug("");
 	
-	const std::string *key;
+	std::string key;
 	int64_t score;
 	int n = 0;
 	while(zset.front(&key, &score)){
-		printf("%s : %4lld\n", key->c_str(), score);
+		printf("%s : %4lld\n", key.c_str(), score);
 		zset.pop_front();
 		n ++;
 	}
 	log_debug("%d", n);
+	
+	{
+		Buffer bs(8192);
+		bs.append_record("a");
+		bs.append_record("bs");
+		dump(bs.data(), bs.size());
+	
+		Bytes s;
+		bs.read_record(&s);
+		dump(s.data(), s.size());
+		bs.read_record(&s);
+		dump(s.data(), s.size());
+	}
 	
 	return 0;
 }

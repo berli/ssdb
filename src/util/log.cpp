@@ -1,10 +1,12 @@
+/*
+Copyright (c) 2012-2014 The SSDB Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+*/
 #include "log.h"
+#include <algorithm>
 
 static Logger logger;
-
-int log_open(FILE *fp, int level, bool is_threadsafe){
-	return logger.open(fp, level, is_threadsafe);
-}
 
 int log_open(const char *filename, int level, bool is_threadsafe, uint64_t rotate_size){
 	return logger.open(filename, level, is_threadsafe, rotate_size);
@@ -18,6 +20,26 @@ void set_log_level(int level){
 	logger.set_level(level);
 }
 
+void set_log_level(const char *s){
+	std::string ss(s);
+	std::transform(ss.begin(), ss.end(), ss.begin(), ::tolower);
+	int level = Logger::LEVEL_DEBUG;
+	if(ss == "fatal"){
+		level = Logger::LEVEL_FATAL;
+	}else if(ss == "error"){
+		level = Logger::LEVEL_ERROR;
+	}else if(ss == "warn"){
+		level = Logger::LEVEL_WARN;
+	}else if(ss == "info"){
+		level = Logger::LEVEL_INFO;
+	}else if(ss == "debug"){
+		level = Logger::LEVEL_DEBUG;
+	}else if(ss == "trace"){
+		level = Logger::LEVEL_TRACE;
+	}
+	logger.set_level(level);
+}
+
 int log_write(int level, const char *fmt, ...){
 	va_list ap;
 	va_start(ap, fmt);
@@ -28,13 +50,17 @@ int log_write(int level, const char *fmt, ...){
 
 /*****/
 
+Logger* Logger::shared(){
+	return &logger;
+}
+
 Logger::Logger(){
-	fp = stdout;
+	fd = STDOUT_FILENO;
 	level_ = LEVEL_DEBUG;
 	mutex = NULL;
 
 	filename[0] = '\0';
-	rotate_size = 0;
+	rotate_size_ = 0;
 	stats.w_curr = 0;
 	stats.w_total = 0;
 }
@@ -47,6 +73,32 @@ Logger::~Logger(){
 	this->close();
 }
 
+std::string Logger::level_name(){
+	switch(level_){
+		case Logger::LEVEL_FATAL:
+			return "fatal";
+		case Logger::LEVEL_ERROR:
+			return "error";
+		case Logger::LEVEL_WARN:
+			return "warn";
+		case Logger::LEVEL_INFO:
+			return "info";
+		case Logger::LEVEL_DEBUG:
+			return "debug";
+		case Logger::LEVEL_TRACE:
+			return "trace";
+	}
+	return "";
+}
+
+std::string Logger::output_name(){
+	return filename;
+}
+
+uint64_t Logger::rotate_size(){
+	return rotate_size_;
+}
+
 void Logger::threadsafe(){
 	if(mutex){
 		pthread_mutex_destroy(mutex);
@@ -57,61 +109,57 @@ void Logger::threadsafe(){
 	pthread_mutex_init(mutex, NULL);
 }
 
-int Logger::open(FILE *fp, int level, bool is_threadsafe){
-	this->fp = fp;
-	this->level_ = level;
-	if(is_threadsafe){
-		this->threadsafe();
-	}
-	return 0;
-}
-
 int Logger::open(const char *filename, int level, bool is_threadsafe, uint64_t rotate_size){
 	if(strlen(filename) > PATH_MAX - 20){
 		fprintf(stderr, "log filename too long!");
 		return -1;
 	}
+	this->level_ = level;
+	this->rotate_size_ = rotate_size;
+	if(is_threadsafe){
+		this->threadsafe();
+	}
 	strcpy(this->filename, filename);
 
-	FILE *fp;
 	if(strcmp(filename, "stdout") == 0){
-		fp = stdout;
+		this->fd = STDOUT_FILENO;
 	}else if(strcmp(filename, "stderr") == 0){
-		fp = stderr;
+		this->fd = STDERR_FILENO;
 	}else{
-		fp = fopen(filename, "a");
-		if(fp == NULL){
+		this->fd = ::open(filename, O_CREAT | O_WRONLY | O_APPEND, 0644);
+		if(this->fd == -1){
+			fprintf(stderr, "open log file %s error - %s\n", filename, strerror(errno));
 			return -1;
 		}
 
 		struct stat st;
-		int ret = fstat(fileno(fp), &st);
+		int ret = fstat(this->fd, &st);
 		if(ret == -1){
-			fprintf(stderr, "fstat log file %s error!", filename);
+			fprintf(stderr, "fstat log file %s error!\n", filename);
 			return -1;
 		}else{
-			this->rotate_size = rotate_size;
 			stats.w_curr = st.st_size;
 		}
 	}
-	return this->open(fp, level, is_threadsafe);
+	return 0;
 }
 
 void Logger::close(){
-	if(fp != stdin && fp != stdout){
-		fclose(fp);
+	if(this->fd != STDOUT_FILENO && this->fd != STDERR_FILENO){
+		::close(this->fd);
 	}
 }
 
 void Logger::rotate(){
-	fclose(fp);
+	::close(this->fd);
+	
 	char newpath[PATH_MAX];
 	time_t time;
 	struct timeval tv;
-	struct tm *tm;
+	struct tm *tm, tm_tmp;
 	gettimeofday(&tv, NULL);
 	time = tv.tv_sec;
-	tm = localtime(&time);
+	tm = localtime_r(&time, &tm_tmp);
 	sprintf(newpath, "%s.%04d%02d%02d-%02d%02d%02d",
 		this->filename,
 		tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday,
@@ -122,8 +170,9 @@ void Logger::rotate(){
 	if(ret == -1){
 		return;
 	}
-	fp = fopen(this->filename, "a");
-	if(fp == NULL){
+	this->fd = ::open(filename, O_CREAT | O_WRONLY | O_APPEND, 0644);
+	if(this->fd == -1){
+		fprintf(stderr, "open log file %s error - %s\n", filename, strerror(errno));
 		return;
 	}
 	stats.w_curr = 0;
@@ -148,10 +197,13 @@ int Logger::get_level(const char *levelname){
 	if(strcmp("fatal", levelname) == 0){
 		return LEVEL_FATAL;
 	}
+	if(strcmp("none", levelname) == 0){
+		return LEVEL_NONE;
+	}
 	return LEVEL_DEBUG;
 }
 
-inline static const char* level_name(int level){
+inline static const char* get_level_name(int level){
 	switch(level){
 		case Logger::LEVEL_FATAL:
 			return "[FATAL] ";
@@ -183,10 +235,10 @@ int Logger::logv(int level, const char *fmt, va_list ap){
 
 	time_t time;
 	struct timeval tv;
-	struct tm *tm;
+	struct tm *tm, tm_tmp;
 	gettimeofday(&tv, NULL);
 	time = tv.tv_sec;
-	tm = localtime(&time);
+	tm = localtime_r(&time, &tm_tmp);
 	/* %3ld 在数值位数超过3位的时候不起作用, 所以这里转成int */
 	len = sprintf(ptr, "%04d-%02d-%02d %02d:%02d:%02d.%03d ",
 		tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday,
@@ -196,7 +248,7 @@ int Logger::logv(int level, const char *fmt, va_list ap){
 	}
 	ptr += len;
 
-	memcpy(ptr, level_name(level), LEVEL_NAME_LEN);
+	memcpy(ptr, get_level_name(level), LEVEL_NAME_LEN);
 	ptr += LEVEL_NAME_LEN;
 
 	int space = sizeof(buf) - (ptr - buf) - 10;
@@ -209,16 +261,14 @@ int Logger::logv(int level, const char *fmt, va_list ap){
 	*ptr = '\0';
 
 	len = ptr - buf;
-	// change to write(), without locking?
 	if(this->mutex){
 		pthread_mutex_lock(this->mutex);
 	}
-	fwrite(buf, len, 1, this->fp);
-	fflush(this->fp);
+	write(this->fd, buf, len);
 
 	stats.w_curr += len;
 	stats.w_total += len;
-	if(rotate_size > 0 && stats.w_curr > rotate_size){
+	if(rotate_size_ > 0 && stats.w_curr > rotate_size_){
 		this->rotate();
 	}
 	if(this->mutex){
